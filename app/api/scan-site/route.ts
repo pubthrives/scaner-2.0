@@ -1,6 +1,4 @@
 // app/api/scan-site/route.ts
-export const runtime = "nodejs";        // force Node.js serverless runtime
-export const dynamic = "force-dynamic"; // prevent static optimization
 import axios from "axios";
 import * as cheerio from "cheerio";
 import OpenAI from "openai";
@@ -19,36 +17,23 @@ const openai = OPENAI_KEY ? new OpenAI({ apiKey: OPENAI_KEY }) : null;
 /* ---------------- HELPERS ---------------- */
 async function fetchHTML(url: string): Promise<string> {
   console.log(`🌐 Fetching: ${url}`);
-
-  // 30s timeout via AbortController
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-
   try {
-    const res = await fetch(url, {
-      method: "GET",
-      // strong browser-like headers improve success rate behind CDNs/WAF
+    const res = await axios.get(url, {
+      timeout: FETCH_TIMEOUT,
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
       },
-      redirect: "follow",
-      signal: controller.signal,
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      maxRedirects: 5,
     });
-
-    const text = await res.text();
-    console.log(`✅ Fetched: ${url} (status ${res.status}, ${text.length} chars)`);
-    return text;
+    console.log(`✅ Fetched: ${url} (${res.data.length} chars)`);
+    return res.data;
   } catch (err: any) {
-    console.warn(`⚠️ Failed to fetch: ${url} — ${err?.name || ""} ${err?.message || err}`);
+    console.warn(`⚠️ Failed to fetch: ${url} — ${err?.message}`);
     return "";
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -281,11 +266,11 @@ Example violations:
   }
 }
 
-  
-function detectClearViolations($: cheerio.Root, url: string): any[] {
+// ✅ STRICT violation detection for CLEAR violations only
+function detectClearViolations($: cheerio.CheerioAPI, url: string): any[] {
   console.log(`🔎 Checking for CLEAR violations on: ${url}`);
   const violations: any[] = [];
-
+  
   // ONLY check for CLEAR, OBVIOUS violations
   const clearViolationPhrases = [
     "cracked software",
@@ -296,56 +281,51 @@ function detectClearViolations($: cheerio.Root, url: string): any[] {
     "hack tool",
     "keygen",
     "serial number crack",
-    "activation key crack",
+    "activation key crack"
   ];
-
-  const pageText = $("body").text().toLowerCase();
-
-  clearViolationPhrases.forEach((phrase) => {
+  
+  const pageText = $('body').text().toLowerCase();
+  clearViolationPhrases.forEach(phrase => {
     if (pageText.includes(phrase)) {
       violations.push({
         type: "Copyright",
         excerpt: `Clear violation phrase found: "${phrase}"`,
-        confidence: 0.95,
+        confidence: 0.95
       });
       console.log(`🚨 Clear violation found: ${phrase}`);
     }
   });
-
+  
   // Check for explicit download links to ILLEGAL content
   const illegalDownloadSelectors = [
     'a[href*="crack"]',
     'a[href*="torrent"]',
     'a:contains("Cracked")',
-    'a:contains("Torrent")',
+    'a:contains("Torrent")'
   ];
-
-  illegalDownloadSelectors.forEach((selector) => {
+  
+  illegalDownloadSelectors.forEach(selector => {
     $(selector).each((_, el) => {
       const element = $(el);
       const text = element.text().toLowerCase();
-      const href = element.attr("href") || "";
-
-      if (
-        (text.includes("crack") || text.includes("torrent")) &&
-        (text.includes("software") ||
-          text.includes("game") ||
-          text.includes("movie"))
-      ) {
+      const href = element.attr('href') || '';
+      
+      // Only flag if it's clearly illegal content
+      if ((text.includes('crack') || text.includes('torrent')) && 
+          (text.includes('software') || text.includes('game') || text.includes('movie'))) {
         violations.push({
           type: "Copyright",
           excerpt: `Illegal download link: ${text} (${href})`,
-          confidence: 0.9,
+          confidence: 0.9
         });
         console.log(`🚨 Illegal download link found: ${text}`);
       }
     });
   });
-
+  
   console.log(`🔎 Clear violations check complete. Found: ${violations.length}`);
-  return violations; // ✅ this is now inside the function
+  return violations;
 }
-    
 
 /* ------------- MAIN HANDLER ------------- */
 export async function POST(req: Request) {
@@ -354,22 +334,6 @@ export async function POST(req: Request) {
   
   try {
     const { url } = await req.json();
-    // Prevent scanning the same origin as the API (recursion/loop/blocked fetch)
-try {
-  const targetHost = new URL(url).host;
-  const apiHost = new URL(req.url).host; // current deployment host
-  if (targetHost === apiHost) {
-    return NextResponse.json(
-      {
-        error:
-          "Refusing to scan the same domain this API is hosted on (to avoid recursion). Try scanning an external site domain.",
-      },
-      { status: 400 }
-    );
-  }
-} catch {
-  // ignore URL parse errors; fetchHTML will handle
-}
     console.log(`🎯 Target URL: ${url}`);
     
     if (!url) {
