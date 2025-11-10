@@ -4,6 +4,7 @@ import * as cheerio from "cheerio";
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import https from "https";
+import type { CheerioAPI } from "cheerio";
 
 /* ---------------- CONFIG ---------------- */
 const FETCH_TIMEOUT = 20000;
@@ -267,7 +268,7 @@ Example violations:
 }
 
 // ✅ STRICT violation detection for CLEAR violations only
-function detectClearViolations($: cheerio.CheerioAPI, url: string): any[] {
+function detectClearViolations($: CheerioAPI, url: string): any[] {
   console.log(`🔎 Checking for CLEAR violations on: ${url}`);
   const violations: any[] = [];
   
